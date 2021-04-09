@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"data_relay/proto/reg_msgs"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -189,9 +188,9 @@ func relayTCP(send_data []byte, ip string, port int) {
 		fmt.Println("Destination IP", dest_ip_port, "is disconnected!")
 		return
 	}
-	bi := make([]byte, 8)
-	binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
-	send_data = binaryComb(bi, send_data)
+	// bi := make([]byte, 8)
+	// binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
+	// send_data = binaryComb(bi, send_data)
 	dest_conn.(net.Conn).Write(send_data)
 }
 
