@@ -5,6 +5,7 @@ import (
 	"data_relay/proto/reg_msgs"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -16,9 +17,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-/* bind port for TCP socket
- * 'vision' data use raw image encode data protocol and relayTCPRaw function
- */
+// In test mode, we need both ip and port to distinguish between 'robot'
+// and 'server'.
+var TEST_MODE = false
+
+// bind port for TCP socket
+// 'vision' data use raw image encode data protocol and relayTCPRaw function
 var TCPPortsDict = map[string]int{
 	"reg": 10000,
 	"msg": 10001,
@@ -44,6 +48,9 @@ var TCPSockets sync.Map
 
 // data_head_length
 const HEAD_LENGTH = 8
+
+// random destination id
+const RANDOM_DEST = "986677"
 
 // communication protocol for register information and 'message' data
 type Message struct {
@@ -102,11 +109,15 @@ func readTCP(socket *net.TCPListener, key string) {
 		port, err := strconv.Atoi(_port)
 		fmt.Println("Get connection. IP:", ip, "Port:", port)
 		checkErr(err)
-		if port == TCPPortsDict["reg"] {
+		if key == "reg" {
 			go handleReg(conn, ip, port, remoteAddr)
-		} else if port == TCPPortsDict["msg"] {
+		} else if key == "msg" {
 			go handleMsg(conn, ip, port, remoteAddr, key)
-			TCPSockets.Store(ip+":"+strconv.Itoa(port), conn)
+			if TEST_MODE {
+				TCPSockets.Store(ip+":"+strconv.Itoa(port), conn)
+			} else {
+				TCPSockets.Store(ip, conn)
+			}
 		}
 	}
 }
@@ -125,10 +136,26 @@ func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 			break
 		}
 		proto.Unmarshal(data, reg_msg)
-		TCPKnownList.Store(reg_msg.GetHostID(), ip+":"+strconv.Itoa(int(reg_msg.GetBindPort())))
-		TCPDestDict.Store(ip+":"+strconv.Itoa(int(reg_msg.GetBindPort())), reg_msg.GetDestID())
+		var address = ip
+		if TEST_MODE {
+			address = ip + ":" + strconv.Itoa(int(reg_msg.GetBindPort()))
+		}
+		TCPKnownList.Store(reg_msg.GetHostID(), address)
+
+		// choose an avalible server randomly for host robot
+		if reg_msg.GetDestID() == RANDOM_DEST {
+			var mapKeys []string
+			TCPServerList.Range(func(key, value interface{}) bool {
+				mapKeys = append(mapKeys, key.(string))
+				return true
+			})
+			TCPDestDict.Store(address, mapKeys[rand.Intn(len(mapKeys))])
+		} else {
+			TCPDestDict.Store(address, reg_msg.GetDestID())
+		}
+
 		if reg_msg.GetIsServer() {
-			TCPServerList.Store(reg_msg.GetHostID(), ip+":"+strconv.Itoa(int(reg_msg.GetBindPort())))
+			TCPServerList.Store(reg_msg.GetHostID(), address)
 		}
 
 		// network part
@@ -140,59 +167,71 @@ func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 // #   msg_relay    #
 // ##################
 func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key string) {
+	var address = ip
+	if TEST_MODE {
+		address = ip + ":" + strconv.Itoa(port)
+	}
 	defer conn.Close()
-	// data := []byte("")
-	// data_cache := []byte("")
-	// data_length := 0
+	defer TCPSockets.Delete(address)
+	defer TCPServerList.Delete(address)
+	defer fmt.Println("Connection closed. IP:", ip, "Port:", port)
 	for {
-		data := make([]byte, 65536)
+		data := make([]byte, 4096)
 		// conn.Read(data)
 		n, err := conn.Read(data)
+
+		// delete empty data
+		data = data[:n]
+
 		if err == io.EOF || n == 0 {
 			break
 		}
-		// if len(data_cache) != 0 {
-		// 	data = binaryComb(data_cache, data)
-		// 	data_cache = []byte("")
-		// }
-		// if data_length == 0 {
-		// 	data_length = int(binary.BigEndian.Uint64(data[:HEAD_LENGTH]))
-		// }
-		// for {
-		// 	if len(data) < data_length {
-		// 		copy(data_cache, data)
-		// 		break
-		// 	}
-		// 	send_data := data[:data_length]
-		// 	data = data[data_length:]
-		// go relayTCP(send_data, ip, port)
-
-		// }
-		go relayTCP(data, ip, port)
+		dest_id, ok := TCPDestDict.Load(address)
+		if !ok {
+			fmt.Println("Destination of Host ", ip+":"+strconv.Itoa(port), " is not registered.")
+			return
+		}
+		dest_address, ok := TCPKnownList.Load(dest_id)
+		if !ok {
+			fmt.Println("Destination", dest_id, "has not been connected!")
+			return
+		}
+		dest_conn, ok := TCPSockets.Load(dest_address)
+		if !ok {
+			fmt.Println("Destination IP", dest_address, "is disconnected!")
+			return
+		}
+		// bi := make([]byte, 8)
+		// binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
+		// send_data = binaryComb(bi, send_data)
+		dest_conn.(net.Conn).Write(data)
 	}
 }
 
-func relayTCP(send_data []byte, ip string, port int) {
-	dest_id, ok := TCPDestDict.Load(ip + ":" + strconv.Itoa(port))
-	if !ok {
-		fmt.Println("Destination is not registered of Host IP", ip+":"+strconv.Itoa(port))
-		return
-	}
-	dest_ip_port, ok := TCPKnownList.Load(dest_id)
-	if !ok {
-		fmt.Println("Destination", dest_id, "has not been connected!")
-		return
-	}
-	dest_conn, ok := TCPSockets.Load(dest_ip_port)
-	if !ok {
-		fmt.Println("Destination IP", dest_ip_port, "is disconnected!")
-		return
-	}
-	// bi := make([]byte, 8)
-	// binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
-	// send_data = binaryComb(bi, send_data)
-	dest_conn.(net.Conn).Write(send_data)
-}
+// func relayTCP(send_data []byte, ip string, port int) {
+// 	dest_id, ok := TCPDestDict.Load(ip + ":" + strconv.Itoa(port))
+// 	if !ok {
+// 		fmt.Println("Destination is not registered of Host IP", ip+":"+strconv.Itoa(port))
+// 		return
+// 	}
+// 	dest_ip_port, ok := TCPKnownList.Load(dest_id)
+// 	if !ok {
+// 		fmt.Println("Destination", dest_id, "has not been connected!")
+// 		return
+// 	}
+// 	dest_conn, ok := TCPSockets.Load(dest_ip_port)
+// 	if !ok {
+// 		fmt.Println("Destination IP", dest_ip_port, "is disconnected!")
+// 		return
+// 	}
+// 	// bi := make([]byte, 8)
+// 	// binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
+// 	// send_data = binaryComb(bi, send_data)
+// 	n, err := dest_conn.(net.Conn).Write(send_data)
+// 	if err == io.EOF || n == 0 {
+// 		fmt.Println("Invalid send!")
+// 	}
+// }
 
 // func handleTCP(conn net.Conn, ip string, port int, remoteAddr net.Addr, key string) {
 // 	defer conn.Close()
@@ -474,6 +513,7 @@ func binaryComb(b1, b2 []byte) (data []byte) {
 }
 
 func main() {
+	fmt.Println("Server start...")
 	for key, port := range TCPPortsDict {
 		clientAddr, err := net.ResolveTCPAddr("tcp4", ":"+strconv.Itoa(port))
 		checkErr(err)
