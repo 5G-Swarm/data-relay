@@ -45,10 +45,11 @@
 
     <table cellpadding="10px" class="niceTable">
     <tr>
-        <th><p>名称</p></th>
-        <th><p>类型</p></th>
         <th><p>地址</p></th>
-        <th><p>端口</p></th>
+        <th><p>主机</p></th>
+        <th><p>目标</p></th>
+        <th><p>状态</p></th>
+        <th><p>是否为服务器</p></th>
         <th><p>发送帧率</p></th>
         <th><p>转发帧率</p></th>
         <th><p>接收帧率</p></th>
@@ -61,10 +62,11 @@
         {{ else }}
             <tr>
         {{ end }}
-            <td><p>{{ .Key }}</p></td>
-            <td><p>{{ .Type }}</p></td>
             <td><p>{{ .IP }}</p></td>
-            <td><p>{{ .Port }}</p></td>
+            <td><p>{{ .ID }}</p></td>
+            <td><p>{{ .Dest }}</p></td>
+            <td><p>{{ .State }}</p></td>
+            <td><p>{{ .IsServer }}</p></td>
             <td><p>{{ .SendFPS }}</p></td>
             <td><p>{{ .RelayFPS }}</p></td>
             <td><p>{{ .RecvFPS }}</p></td>

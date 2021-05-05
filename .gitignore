@@ -24,4 +24,4 @@ test*
 *.pb.go
 
 # go compiled file
-server
+relay

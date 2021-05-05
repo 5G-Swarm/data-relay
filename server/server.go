@@ -1,18 +1,13 @@
-package main
+package server
 
 import (
-	"bytes"
 	"data_relay/proto/reg_msgs"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
-	"net/http"
 	"strconv"
-	"strings"
 	"sync"
-	"text/template"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -61,35 +56,7 @@ type Message struct {
 	Data  string
 }
 
-var TCPIPs, TCPPorts sync.Map
-var typeDict sync.Map // true is server, false is client
-
-var TCPSendCnt, TCPRelayCnt, TCPRecvCnt sync.Map
-
 var TCPStateMap sync.Map
-
-// Block the main function
-var done = make(chan struct{})
-
-// web visualization information
-type SocketState struct {
-	Key      string
-	Type     string
-	IP       string
-	Port     int
-	SendFPS  int
-	RelayFPS int
-	RecvFPS  int
-}
-
-// index.html resource
-var myTemplate *template.Template
-
-// data for web HTML
-var socketStates []SocketState
-
-// slice is not thread-safe
-var mutex sync.RWMutex
 
 // check error, function just prints the error information
 func checkErr(err error) {
@@ -128,6 +95,7 @@ func readTCP(socket *net.TCPListener, key string) {
 // ##################
 func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 	defer conn.Close()
+	defer fmt.Println("Connection closed. IP:", ip, "Port:", port)
 	for {
 		data := make([]byte, 2048)
 		reg_msg := &reg_msgs.RegInfo{}
@@ -159,7 +127,20 @@ func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 		}
 
 		// network part
-
+		state := SocketState{
+			ID:       reg_msg.GetHostID(),
+			Dest:     reg_msg.GetDestID(),
+			State:    "Connected",
+			IsServer: reg_msg.GetIsServer(),
+			IP:       address,
+			RelayFPS: 0,
+			RelayFPS: 0,
+			RecvFPS:  0,
+		}
+		TCPStateMap.Store(address, state)
+		TCPRelayCnt.Store(address, 0)
+		TCPRelayCnt.Store(address, 0)
+		TCPRecvCnt.Store(address, 0)
 	}
 }
 
@@ -186,6 +167,16 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 		if err == io.EOF || n == 0 {
 			break
 		}
+
+		// record successful Relay cnt
+		RelayCnt, _ := TCPRelayCnt.Load(address)
+		switch RelayCnt := RelayCnt.(type) {
+		case int:
+			TCPRelayCnt.Store(address, RelayCnt+1)
+		default:
+			TCPRelayCnt.Store(address, 0)
+		}
+
 		dest_id, ok := TCPDestDict.Load(address)
 		if !ok {
 			fmt.Println("Destination of Host ", ip+":"+strconv.Itoa(port), " is not registered.")
@@ -201,14 +192,38 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 			fmt.Println("Destination IP", dest_address, "is disconnected!")
 			return
 		}
-		// bi := make([]byte, 8)
-		// binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
-		// send_data = binaryComb(bi, send_data)
+
+		// record successful relay cnt
+		relayCnt, _ := TCPRelayCnt.Load(address)
+		switch relayCnt := relayCnt.(type) {
+		case int:
+			TCPRelayCnt.Store(address, relayCnt+1)
+		default:
+			TCPRelayCnt.Store(address, 0)
+		}
+
 		dest_conn.(net.Conn).Write(data)
+
+		// record successful recv cnt of destination
+		recvCnt, _ := TCPRecvCnt.Load(dest_address)
+		switch recvCnt := recvCnt.(type) {
+		case int:
+			TCPRecvCnt.Store(address, recvCnt+1)
+		default:
+			TCPRecvCnt.Store(address, 0)
+		}
 	}
+	// change the connection state
+	var _state, _ = TCPStateMap.Load(address)
+	var state = _state.(SocketState)
+	state.State = "Disconnected"
+	state.RelayFPS = 0
+	state.RelayFPS = 0
+	state.RecvFPS = 0
+	defer TCPStateMap.Store(address, state)
 }
 
-// func relayTCP(send_data []byte, ip string, port int) {
+// func relayTCP(Relay_data []byte, ip string, port int) {
 // 	dest_id, ok := TCPDestDict.Load(ip + ":" + strconv.Itoa(port))
 // 	if !ok {
 // 		fmt.Println("Destination is not registered of Host IP", ip+":"+strconv.Itoa(port))
@@ -225,11 +240,11 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 		return
 // 	}
 // 	// bi := make([]byte, 8)
-// 	// binary.BigEndian.PutUint64(bi, uint64(len(send_data)))
-// 	// send_data = binaryComb(bi, send_data)
-// 	n, err := dest_conn.(net.Conn).Write(send_data)
+// 	// binary.BigEndian.PutUint64(bi, uint64(len(Relay_data)))
+// 	// Relay_data = binaryComb(bi, Relay_data)
+// 	n, err := dest_conn.(net.Conn).Write(Relay_data)
 // 	if err == io.EOF || n == 0 {
-// 		fmt.Println("Invalid send!")
+// 		fmt.Println("Invalid Relay!")
 // 	}
 // }
 
@@ -325,9 +340,9 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 			if isServer.(bool) {
 // 				stateKey = "server:" + id
 // 			}
-// 			SocketState := SocketState{Key: stateKey, Type: "TCP", IP: ip, Port: port, SendFPS: 0, RelayFPS: 0, RecvFPS: 0}
+// 			SocketState := SocketState{Key: stateKey, Type: "TCP", IP: ip, Port: port, RelayFPS: 0, RelayFPS: 0, RecvFPS: 0}
 // 			TCPStateMap.Store(message.Id+":"+key, SocketState)
-// 			TCPSendCnt.Store(message.Id+":"+key, 0)
+// 			TCPRelayCnt.Store(message.Id+":"+key, 0)
 // 			TCPRelayCnt.Store(message.Id+":"+key, 0)
 // 			TCPRecvCnt.Store(message.Id+":"+key, 0)
 // 		} else { // other types message
@@ -354,7 +369,7 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 					TCPPorts.Delete(ID.(string) + ":" + key)
 // 					TCPSockets.Delete(ID.(string) + ":" + key)
 // 					typeDict.Delete(ID.(string))
-// 					TCPSendCnt.Delete(ID.(string) + ":" + key)
+// 					TCPRelayCnt.Delete(ID.(string) + ":" + key)
 // 					TCPRelayCnt.Delete(ID.(string) + ":" + key)
 // 					TCPRecvCnt.Delete(ID.(string) + ":" + key)
 // 					return true
@@ -370,13 +385,13 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // func relayTCP(data []byte, n int, message Message, key string) {
 // 	fmt.Println("Relay data len:", n)
 // 	// state info
-// 	cnt, _ := TCPSendCnt.Load(message.Id + ":" + key)
+// 	cnt, _ := TCPRelayCnt.Load(message.Id + ":" + key)
 // 	// check type for safety
 // 	switch cnt := cnt.(type) {
 // 	case int:
-// 		TCPSendCnt.Store(message.Id+":"+key, cnt+1)
+// 		TCPRelayCnt.Store(message.Id+":"+key, cnt+1)
 // 	default:
-// 		TCPSendCnt.Store(message.Id+":"+key, 0)
+// 		TCPRelayCnt.Store(message.Id+":"+key, 0)
 // 	}
 
 // 	destID := message.Dest
@@ -385,7 +400,7 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 		fmt.Println("No ID in typeDict", message.Id)
 // 		return
 // 	}
-// 	// server sends data to client directly
+// 	// server Relays data to client directly
 // 	if isServer.(bool) {
 // 		socket, ok := TCPSockets.Load(destID + ":" + key)
 // 		if !ok {
@@ -393,12 +408,12 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 			//fmt.Println("Data: ", message.Data)
 // 			return
 // 		}
-// 		// send
+// 		// Relay
 // 		socket.(net.Conn).Write(data[:n])
 // 	} else { // find a best server for client
 // 		destID = findServer()
 // 		if destID == "nil" {
-// 			fmt.Println("No server to send data")
+// 			fmt.Println("No server to Relay data")
 // 			return
 // 		}
 // 		socket, ok := TCPSockets.Load(destID + ":" + key)
@@ -406,7 +421,7 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 			fmt.Println("No destination", destID+":"+key)
 // 			return
 // 		}
-// 		// send
+// 		// Relay
 // 		socket.(net.Conn).Write(data[:n])
 // 	}
 
@@ -430,89 +445,15 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 // 	}
 // }
 
-func findServer() string {
-	var serverId = "nil"
-	typeDict.Range(func(id, isServer interface{}) bool {
-		if isServer.(bool) {
-			serverId = id.(string)
-		}
-		return true
-	})
-	return serverId
-}
+// func binaryComb(b1, b2 []byte) (data []byte) {
+// 	var buffer bytes.Buffer
+// 	buffer.Write(b1)
+// 	buffer.Write(b2)
+// 	data = buffer.Bytes()
+// 	return data
+// }
 
-func FPSCounter() {
-	duration := time.Duration(time.Second)
-	t := time.NewTicker(duration)
-	defer t.Stop()
-	for {
-		<-t.C
-		var states []SocketState
-		TCPSockets.Range(func(idWithKey, socket interface{}) bool {
-			sendCnt, ok := TCPSendCnt.Load(idWithKey)
-			if !ok {
-				fmt.Println("No key in TCPSendCnt", idWithKey)
-				return true
-			}
-			relayCnt, ok := TCPRelayCnt.Load(idWithKey)
-			if !ok {
-				fmt.Println("No key in TCPRelayCnt", idWithKey)
-				return true
-			}
-			recvCnt, ok := TCPRecvCnt.Load(idWithKey)
-			if !ok {
-				fmt.Println("No key in TCPRecvCnt", idWithKey)
-				return true
-			}
-			_state, _ := TCPStateMap.Load(idWithKey)
-			state := _state.(SocketState)
-			state.SendFPS = sendCnt.(int)
-			state.RelayFPS = relayCnt.(int)
-			state.RecvFPS = recvCnt.(int)
-			states = append(states, state)
-
-			id := strings.Split(idWithKey.(string), ":")[0]
-			isServer, _ := typeDict.Load(id)
-			key := "client:" + id
-			if isServer.(bool) {
-				key = "server:" + id
-			}
-			newState := SocketState{Key: key, Type: "TCP", IP: state.IP, Port: state.Port, SendFPS: 0, RelayFPS: 0, RecvFPS: 0}
-			TCPStateMap.Store(idWithKey, newState)
-			TCPSendCnt.Store(idWithKey, 0)
-			TCPRelayCnt.Store(idWithKey, 0)
-			TCPRecvCnt.Store(idWithKey, 0)
-			return true
-		})
-		mutex.Lock()
-		socketStates = states
-		mutex.Unlock()
-	}
-}
-
-func initTemplate(fileName string) (err error) {
-	myTemplate, err = template.ParseFiles(fileName)
-	checkErr(err)
-	return err
-}
-
-func webHandler(writer http.ResponseWriter, request *http.Request) {
-	data := make(map[string]interface{})
-	data["title"] = "Data Relay"
-	mutex.RLock()
-	data["states"] = socketStates
-	mutex.RUnlock()
-	myTemplate.Execute(writer, data)
-}
-func binaryComb(b1, b2 []byte) (data []byte) {
-	var buffer bytes.Buffer
-	buffer.Write(b1)
-	buffer.Write(b2)
-	data = buffer.Bytes()
-	return data
-}
-
-func main() {
+func Run() {
 	fmt.Println("Server start...")
 	for key, port := range TCPPortsDict {
 		clientAddr, err := net.ResolveTCPAddr("tcp4", ":"+strconv.Itoa(port))
@@ -521,10 +462,5 @@ func main() {
 		checkErr(err)
 		go readTCP(clientListener, key)
 	}
-	// go FPSCounter()
-	// initTemplate("./index.html")
-	// http.HandleFunc("/", webHandler)
-	// err := http.ListenAndServe("0.0.0.0:8080", nil)
-	// checkErr(err)
-	<-done
+	WebRun()
 }
