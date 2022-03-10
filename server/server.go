@@ -14,7 +14,7 @@ import (
 
 // In test mode, we need both ip and port to distinguish between 'robot'
 // and 'server'.
-var TEST_MODE = false
+var TEST_MODE = true
 
 // bind port for TCP socket
 var TCPPortsDict = map[string]int{
