@@ -22,13 +22,7 @@ var TCPPortsDict = map[string]int{
 	"msg": 10001,
 }
 
-// ########################################################################
-// # First, get the target ID from the host address via [TCPDestDict]     #
-// # Second, get the target address from the target ID via [TCPKnownList] #
-// # Finally, get the conn from the target address via [TCPSockets]       #
-// ########################################################################
-
-// id to ip:port
+// id to ip(:port)
 var TCPKnownList sync.Map
 
 // ip:port to dest id
@@ -166,6 +160,12 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 		default:
 			TCPSendCnt.Store(address, 0)
 		}
+
+		// ########################################################################
+		// # First, get the target ID from the host address via [TCPDestDict]     #
+		// # Second, get the target address from the target ID via [TCPKnownList] #
+		// # Finally, get the conn from the target address via [TCPSockets]       #
+		// ########################################################################
 
 		dest_id, ok := TCPDestDict.Load(address)
 		if !ok {
