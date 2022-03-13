@@ -8,7 +8,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-
 	"google.golang.org/protobuf/proto"
 )
 
@@ -20,6 +19,8 @@ var TEST_MODE = true
 var TCPPortsDict = map[string]int{
 	"reg": 10000,
 	"msg": 10001,
+	"img": 10002,
+	// "sync": 10003,
 }
 
 // id to ip(:port)
@@ -62,7 +63,16 @@ func readTCP(socket *net.TCPListener, key string) {
 		checkErr(err)
 		if key == "reg" {
 			go handleReg(conn, ip, port, remoteAddr)
+		// TODO
+		// } else if key == "msg" {
 		} else if key == "msg" {
+			go handleMsg(conn, ip, port, remoteAddr, key)
+			if TEST_MODE {
+				TCPSockets.Store(ip+":"+strconv.Itoa(port), conn)
+			} else {
+				TCPSockets.Store(ip, conn)
+			}
+		} else if key == "img" {
 			go handleMsg(conn, ip, port, remoteAddr, key)
 			if TEST_MODE {
 				TCPSockets.Store(ip+":"+strconv.Itoa(port), conn)
@@ -141,7 +151,7 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 	defer TCPServerList.Delete(address)
 	defer fmt.Println("Connection closed. IP:", ip, "Port:", port)
 	for {
-		data := make([]byte, 4096)
+		data := make([]byte, 65535)
 		// conn.Read(data)
 		n, err := conn.Read(data)
 
