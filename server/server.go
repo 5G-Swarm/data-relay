@@ -13,7 +13,6 @@ import (
 
 // In test mode, we need both ip and port to distinguish between 'robot'
 // and 'server'.
-var TEST_MODE = true
 
 // bind port for TCP socket
 var TCPPortsDict = map[string]int{
@@ -59,27 +58,18 @@ func readTCP(socket *net.TCPListener, key string) {
 		remoteAddr := conn.RemoteAddr()
 		ip, _port, _ := net.SplitHostPort(remoteAddr.String())
 		port, err := strconv.Atoi(_port)
-		fmt.Println("Get connection. IP:", ip, "Port:", port)
+		fmt.Println("Get connection. IP:", ip, "Port:", port, "Key:", key)
 		checkErr(err)
 		if key == "reg" {
 			go handleReg(conn, ip, port, remoteAddr)
 		// TODO
 		// } else if key == "msg" {
-		} else if key == "msg" {
+		} else {
+			var address = ip + ":" + strconv.Itoa(port) + "/" + key
+			TCPSockets.Store(address, conn)
 			go handleMsg(conn, ip, port, remoteAddr, key)
-			if TEST_MODE {
-				TCPSockets.Store(ip+":"+strconv.Itoa(port), conn)
-			} else {
-				TCPSockets.Store(ip, conn)
-			}
-		} else if key == "img" {
-			go handleMsg(conn, ip, port, remoteAddr, key)
-			if TEST_MODE {
-				TCPSockets.Store(ip+":"+strconv.Itoa(port), conn)
-			} else {
-				TCPSockets.Store(ip, conn)
-			}
 		}
+		
 	}
 }
 
@@ -98,11 +88,10 @@ func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 			break
 		}
 		proto.Unmarshal(data, reg_msg)
-		var address = ip
-		if TEST_MODE {
-			address = ip + ":" + strconv.Itoa(int(reg_msg.GetBindPort()))
-		}
-		TCPKnownList.Store(reg_msg.GetHostID(), address)
+		var reg_key = string(reg_msg.GetKey())
+		var address = ip + ":" + strconv.Itoa(int(reg_msg.GetBindPort())) + "/" + reg_key
+		// var address = ip + ":" + string(port) + "/" + reg_key
+		TCPKnownList.Store(reg_msg.GetHostID() + "/" + reg_key, address)
 
 		// choose an avalible server randomly for host robot
 		if reg_msg.GetDestID() == RANDOM_DEST {
@@ -117,7 +106,7 @@ func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 		}
 
 		if reg_msg.GetIsServer() {
-			TCPServerList.Store(reg_msg.GetHostID(), address)
+			TCPServerList.Store(reg_msg.GetHostID() + "/" + reg_key, address)
 		}
 
 		// network part
@@ -142,10 +131,7 @@ func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
 // #   msg_relay    #
 // ##################
 func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key string) {
-	var address = ip
-	if TEST_MODE {
-		address = ip + ":" + strconv.Itoa(port)
-	}
+	var address = ip + ":" + strconv.Itoa(port) + "/" + key
 	defer conn.Close()
 	defer TCPSockets.Delete(address)
 	defer TCPServerList.Delete(address)
@@ -179,10 +165,10 @@ func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key stri
 
 		dest_id, ok := TCPDestDict.Load(address)
 		if !ok {
-			fmt.Println("Destination of Host ", ip+":"+strconv.Itoa(port), " is not registered.")
+			fmt.Println("Destination of Host ", ip + ":" + strconv.Itoa(port) + "/" + key, " is not registered.")
 			return
 		}
-		dest_address, ok := TCPKnownList.Load(dest_id)
+		dest_address, ok := TCPKnownList.Load(dest_id.(string) + "/" + key)
 		if !ok {
 			fmt.Println("Destination", dest_id, "has not been connected!")
 			return

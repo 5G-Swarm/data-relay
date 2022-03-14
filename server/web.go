@@ -37,17 +37,17 @@ func FPSCounter() {
 		TCPSockets.Range(func(idWithKey, socket interface{}) bool {
 			sendCnt, ok := TCPSendCnt.Load(idWithKey)
 			if !ok {
-				fmt.Println("No key in TCPSendCnt", idWithKey)
+				fmt.Println("[web.go:] No key in TCPSendCnt", idWithKey)
 				return true
 			}
 			relayCnt, ok := TCPRelayCnt.Load(idWithKey)
 			if !ok {
-				fmt.Println("No key in TCPRelayCnt", idWithKey)
+				fmt.Println("[web.go:]No key in TCPRelayCnt", idWithKey)
 				return true
 			}
 			recvCnt, ok := TCPRecvCnt.Load(idWithKey)
 			if !ok {
-				fmt.Println("No key in TCPRecvCnt", idWithKey)
+				fmt.Println("[web.go:]No key in TCPRecvCnt", idWithKey)
 				return true
 			}
 			_state, _ := TCPStateMap.Load(idWithKey)
