@@ -23,6 +23,8 @@ var TCPPortsDict = map[string]int{
 	// "sync": 10003,
 }
 
+var TCPAddrList sync.Map
+
 // id to ip(:port)
 var TCPKnownList sync.Map
 
@@ -59,19 +61,16 @@ func readTCP(socket *net.TCPListener, key string) {
 		remoteAddr := conn.RemoteAddr()
 		ip, _port, _ := net.SplitHostPort(remoteAddr.String())
 		port, err := strconv.Atoi(_port)
-		fmt.Println("\033[1;34m Get connection. IP:", ip, "Port:", port, "Key:", key, "\033[0m")
 		checkErr(err)
-		if key == "reg" {
-			go handleReg(conn, ip, port, remoteAddr)
-			// TODO
-			// } else if key == "msg" {
-		} else {
-			// var address = ip + ":" + strconv.Itoa(port) + "/" + key
-			var address = ip + "/" + key
-			TCPSockets.Store(address, conn)
-			go handleMsg(conn, ip, port, remoteAddr, key)
-		}
+		fmt.Println("\033[1;34m Get connection. IP:", ip, "Port:", port, "Key:", key, "\033[0m")
 
+		handleReg(conn, ip, port)
+		TCPAddrList.Store(ip+":"+_port, key)
+
+		var address = ip + ":" + _port + "/" + key
+		TCPSockets.Store(address, conn)
+		fmt.Println("SEART to relay !!!")
+		go handleMsg(conn, ip, port, remoteAddr, key)
 	}
 }
 
@@ -79,65 +78,116 @@ func readTCP(socket *net.TCPListener, key string) {
 // ##################
 // #  registration  #
 // ##################
-func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
-	defer conn.Close()
-	defer fmt.Println("\033[1;36m Connection closed. IP:", ip, "Port:", port, "\033[0m")
-	for {
-		data := make([]byte, 2048)
-		reg_msg := &reg_msgs.RegInfo{}
-		n, err := conn.Read(data)
-		if err == io.EOF || n == 0 {
-			break
-		}
-		proto.Unmarshal(data, reg_msg)
-		var reg_key = string(reg_msg.GetKey())
-		// var address = ip + ":" + strconv.Itoa(int(reg_msg.GetBindPort())) + "/" + reg_key
-		var address = ip + "/" + reg_key
-		// var address = ip + ":" + strconv.Itoa(port) + "/" + reg_key
-		fmt.Println("[DEBUG] reg address", address, port)
-		TCPKnownList.Store(reg_msg.GetHostID()+"/"+reg_key, address)
-
-		// choose an avalible server randomly for host robot
-		if reg_msg.GetDestID() == RANDOM_DEST {
-			var mapKeys []string
-			TCPServerList.Range(func(key, value interface{}) bool {
-				mapKeys = append(mapKeys, key.(string))
-				return true
-			})
-			TCPDestDict.Store(address, mapKeys[rand.Intn(len(mapKeys))])
-		} else {
-			TCPDestDict.Store(address, reg_msg.GetDestID())
-		}
-
-		if reg_msg.GetIsServer() {
-			TCPServerList.Store(reg_msg.GetHostID()+"/"+reg_key, address)
-		}
-
-		// network part
-		state := SocketState{
-			ID:       reg_msg.GetHostID(),
-			Dest:     reg_msg.GetDestID(),
-			State:    "Connected",
-			IsServer: reg_msg.GetIsServer(),
-			IP:       address,
-			SendFPS:  0,
-			RelayFPS: 0,
-			RecvFPS:  0,
-		}
-		TCPStateMap.Store(address, state)
-		TCPSendCnt.Store(address, 0)
-		TCPRelayCnt.Store(address, 0)
-		TCPRecvCnt.Store(address, 0)
-		fmt.Println("\033[1;32m Establish connection: HostID:", reg_msg.GetHostID(), "Key:", reg_key, "\033[0m")
+func handleReg(conn net.Conn, ip string, port int) {
+	data := make([]byte, 2048)
+	reg_msg := &reg_msgs.RegInfo{}
+	n, err := conn.Read(data)
+	if err == io.EOF || n == 0 {
+		fmt.Println("Read data error in func: [handleReg]")
+		return
 	}
+	proto.Unmarshal(data, reg_msg)
+	var reg_key = string(reg_msg.GetKey())
+	// var address = ip + ":" + strconv.Itoa(int(reg_msg.GetBindPort())) + "/" + reg_key
+	// var address = ip + "/" + reg_key
+	var address = ip + ":" + strconv.Itoa(port) + "/" + reg_key
+	fmt.Println("[DEBUG] reg address", address, port)
+	TCPKnownList.Store(reg_msg.GetHostID()+"/"+reg_key, address)
+
+	// choose an avalible server randomly for host robot
+	if reg_msg.GetDestID() == RANDOM_DEST {
+		var mapKeys []string
+		TCPServerList.Range(func(key, value interface{}) bool {
+			mapKeys = append(mapKeys, key.(string))
+			return true
+		})
+		TCPDestDict.Store(address, mapKeys[rand.Intn(len(mapKeys))])
+	} else {
+		TCPDestDict.Store(address, reg_msg.GetDestID())
+	}
+
+	if reg_msg.GetIsServer() {
+		TCPServerList.Store(reg_msg.GetHostID()+"/"+reg_key, address)
+	}
+
+	// network part
+	state := SocketState{
+		ID:       reg_msg.GetHostID(),
+		Dest:     reg_msg.GetDestID(),
+		State:    "Connected",
+		IsServer: reg_msg.GetIsServer(),
+		IP:       address,
+		SendFPS:  0,
+		RelayFPS: 0,
+		RecvFPS:  0,
+	}
+	TCPStateMap.Store(address, state)
+	fmt.Println("Store TCPSendCnt key", address)
+	TCPSendCnt.Store(address, 0)
+	TCPRelayCnt.Store(address, 0)
+	TCPRecvCnt.Store(address, 0)
+	fmt.Println("\033[1;32m Establish connection: HostID:", reg_msg.GetHostID(), "Key:", reg_key, "\033[0m")
 }
+
+// func handleReg(conn net.Conn, ip string, port int, remoteAddr net.Addr) {
+// 	// defer conn.Close()
+// 	// defer fmt.Println("\033[1;36m Connection closed. IP:", ip, "Port:", port, "\033[0m")
+// 	for {
+// 		data := make([]byte, 2048)
+// 		reg_msg := &reg_msgs.RegInfo{}
+// 		n, err := conn.Read(data)
+// 		if err == io.EOF || n == 0 {
+// 			break
+// 		}
+// 		proto.Unmarshal(data, reg_msg)
+// 		var reg_key = string(reg_msg.GetKey())
+// 		// var address = ip + ":" + strconv.Itoa(int(reg_msg.GetBindPort())) + "/" + reg_key
+// 		var address = ip + "/" + reg_key
+// 		// var address = ip + ":" + strconv.Itoa(port) + "/" + reg_key
+// 		fmt.Println("[DEBUG] reg address", address, port)
+// 		TCPKnownList.Store(reg_msg.GetHostID()+"/"+reg_key, address)
+
+// 		// choose an avalible server randomly for host robot
+// 		if reg_msg.GetDestID() == RANDOM_DEST {
+// 			var mapKeys []string
+// 			TCPServerList.Range(func(key, value interface{}) bool {
+// 				mapKeys = append(mapKeys, key.(string))
+// 				return true
+// 			})
+// 			TCPDestDict.Store(address, mapKeys[rand.Intn(len(mapKeys))])
+// 		} else {
+// 			TCPDestDict.Store(address, reg_msg.GetDestID())
+// 		}
+
+// 		if reg_msg.GetIsServer() {
+// 			TCPServerList.Store(reg_msg.GetHostID()+"/"+reg_key, address)
+// 		}
+
+// 		// network part
+// 		state := SocketState{
+// 			ID:       reg_msg.GetHostID(),
+// 			Dest:     reg_msg.GetDestID(),
+// 			State:    "Connected",
+// 			IsServer: reg_msg.GetIsServer(),
+// 			IP:       address,
+// 			SendFPS:  0,
+// 			RelayFPS: 0,
+// 			RecvFPS:  0,
+// 		}
+// 		TCPStateMap.Store(address, state)
+// 		TCPSendCnt.Store(address, 0)
+// 		TCPRelayCnt.Store(address, 0)
+// 		TCPRecvCnt.Store(address, 0)
+// 		fmt.Println("\033[1;32m Establish connection: HostID:", reg_msg.GetHostID(), "Key:", reg_key, "\033[0m")
+// 	}
+// }
 
 // ##################
 // #   msg_relay    #
 // ##################
 func handleMsg(conn net.Conn, ip string, port int, remoteAddr net.Addr, key string) {
-	// var address = ip + ":" + strconv.Itoa(port) + "/" + key
-	var address = ip + "/" + key
+	var address = ip + ":" + strconv.Itoa(port) + "/" + key
+	// var address = ip + "/" + key
 	defer conn.Close()
 	defer TCPSockets.Delete(address)
 	defer TCPServerList.Delete(address)
