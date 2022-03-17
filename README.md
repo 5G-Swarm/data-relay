@@ -41,3 +41,14 @@ $ ./data_relay
 | TCPPortsDict  |             |             |
 | TCPAddrList   | ip:port     | key         |
 |               |             |             |
+
+
+| name          | key        | value      |
+| ------------- | ---------- | ---------- |
+| AddressMap    | hostID/key | IP:port    |
+| DestMap       | hostID/key | destID/key |
+| TCPServerList | hostID/key | IP:port    |
+| TCPSockets    | hostID/key | conn       |
+| TCPSendCnt    | hostID/key |            |
+| TCPAddrList   |            |            |
+|               |            |            |
