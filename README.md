@@ -30,25 +30,10 @@ $ ./data_relay
 
 
 ## Dict info
-
-| name          | key         | value       |
-| ------------- | ----------- | ----------- |
-| TCPKnownList  | hostID/key  | IP:port/key |
-| TCPDestDict   | IP:port/key | destID      |
-| TCPServerList | hostID/key  | IP:port/key |
-| TCPSockets    | IP:port/key | conn        |
-| TCPSendCnt    | IP:port/key | 0           |
-| TCPPortsDict  |             |             |
-| TCPAddrList   | ip:port     | key         |
-|               |             |             |
-
-
 | name          | key        | value      |
 | ------------- | ---------- | ---------- |
 | AddressMap    | hostID/key | IP:port    |
 | DestMap       | hostID/key | destID/key |
 | TCPServerList | hostID/key | IP:port    |
 | TCPSockets    | hostID/key | conn       |
-| TCPSendCnt    | hostID/key |            |
-| TCPAddrList   |            |            |
-|               |            |            |
+| TCPSendCnt    | hostID/key | 0          |

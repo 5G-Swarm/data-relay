@@ -31,9 +31,6 @@ var TCPStateMap sync.Map
 // data_head_length
 const HEAD_LENGTH = 8
 
-// random destination id
-const RANDOM_DEST = "986677"
-
 // check error, function just prints the error information
 func checkErr(err error) {
 	if err != nil {
