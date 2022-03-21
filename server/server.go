@@ -18,8 +18,9 @@ import (
 var TCPPortsDict = map[string]int{
 	"reg":  10000,
 	"msg":  10001,
-	"img":  10002,
-	"sync": 10003,
+	"odm":  10002,
+	"path": 10003,
+	"cmd":  10004,
 }
 
 var AddressMap sync.Map
